@@ -38,6 +38,27 @@ if (!config.database.password) {
   console.warn('Warning: DB_PASSWORD not set in .env file');
 }
 
+if(!config.database.host) {
+  console.warn('Warning: DB_HOST not set in .env file');
+}
+
+if(!config.database.user) {
+  console.warn('Warning: DB_USER not set in .env file');
+}
+
+if(!config.database.database) {
+  console.warn('Warning: DB_NAME not set in .env file');
+}
+
+if(!config.database.port) {
+  console.warn('Warning: DB_PORT not set in .env file');
+}
+
+if (isNaN(config.indexer.backfillDays) || config.indexer.backfillDays <= 0) {
+  console.warn('Warning: BACKFILL_DAYS is not a valid positive number. Defaulting to 30 days.');
+  config.indexer.backfillDays = 30;
+}
+
 if (config.indexer.tokenMints.length === 0) {
   console.warn('Warning: No TOKEN_MINTS configured. Using USDC as default.');
   config.indexer.tokenMints = ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'];
