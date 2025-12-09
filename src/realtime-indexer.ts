@@ -102,7 +102,6 @@ export class RealtimeIndexer {
         },
       ],
     };
-    console.log("Request --> ", request);
 
     if (this.ws) {
       this.ws.send(JSON.stringify(request));

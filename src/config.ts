@@ -11,7 +11,7 @@ export const config = {
   helius: {
     apiKey: process.env.HELIUS_API_KEY,
     wsUrl: "wss://atlas-mainnet.helius-rpc.com",
-    httpUrl: "https://api.helius.xyz",
+    httpUrl: "https://api-mainnet.helius-rpc.com",
   },
 
   database: {
