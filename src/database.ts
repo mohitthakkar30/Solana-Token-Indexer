@@ -1,29 +1,33 @@
-import pg from 'pg';
-import { config } from './config.js';
+import pg from "pg";
+import { config } from "./config.js";
 
 const { Pool } = pg;
 
 export class Database {
+  pool: any;
   constructor() {
     this.pool = new Pool(config.database);
-    this.pool.on('error', (err) => {
-      console.error('Unexpected database error:', err);
+    this.pool.on("error", (err: any) => {
+      console.error("Unexpected database error:", err);
     });
   }
 
   async connect() {
     try {
       const client = await this.pool.connect();
-      console.log('✓ Database connected successfully');
+      console.log("✓ Database connected successfully");
       client.release();
       return true;
     } catch (error) {
-      console.error('✗ Database connection failed:', error.message);
+      console.error(
+        "✗ Database connection failed:",
+        error instanceof Error ? error.message : String(error)
+      );
       return false;
     }
   }
 
-  async query(text, params) {
+  async query(text: string, params: any[] | undefined) {
     const start = Date.now();
     try {
       const result = await this.pool.query(text, params);
@@ -33,47 +37,70 @@ export class Database {
       }
       return result;
     } catch (error) {
-      console.error('Query error:', error.message);
+      console.error(
+        "Query error:",
+        error instanceof Error ? error.message : String(error)
+      );
       throw error;
     }
   }
 
-  async insertTransfer(transfer) {
-    return this.query(`
+  async insertTransfer(transfer: {
+    signature: any;
+    instructionIndex: any;
+    slot: any;
+    blockTime: any;
+    mint: any;
+    from: any;
+    to: any;
+    amount: any;
+    decimals: any;
+  }) {
+    return this.query(
+      `
       INSERT INTO token_transfers
       (signature, instruction_index, block_time, slot, mint, from_account, to_account, amount, decimals)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT (signature, instruction_index, block_time) DO NOTHING
       RETURNING signature
-    `, [
-      transfer.signature,
-      transfer.instructionIndex,
-      transfer.blockTime,
-      transfer.slot,
-      transfer.mint,
-      transfer.from,
-      transfer.to,
-      transfer.amount.toString(),
-      transfer.decimals
-    ]);
+    `,
+      [
+        transfer.signature,
+        transfer.instructionIndex,
+        transfer.blockTime,
+        transfer.slot,
+        transfer.mint,
+        transfer.from,
+        transfer.to,
+        transfer.amount.toString(),
+        transfer.decimals,
+      ]
+    );
   }
 
   async getLastTransferTime() {
-    const result = await this.query(`
+    const result = await this.query(
+      `
       SELECT MAX(block_time) as last_time FROM token_transfers
-    `);
+    `,
+      undefined
+    );
     return result.rows[0]?.last_time;
   }
 
   async getTransferCount() {
-    const result = await this.query(`
+    const result = await this.query(
+      `
       SELECT COUNT(*) as count FROM token_transfers
-    `);
+    `,
+      undefined
+    );
     return parseInt(result.rows[0].count);
   }
 
   async getStats() {
-    const result = await this.query(`
+    const result = await this.query(
+      `
       SELECT 
         COUNT(*) as total_transfers,
         COUNT(DISTINCT mint) as unique_mints,
@@ -82,12 +109,19 @@ export class Database {
         MIN(block_time) as first_transfer,
         MAX(block_time) as last_transfer
       FROM token_transfers
-    `);
+    `,
+      undefined
+    );
     return result.rows[0];
   }
 
-  async updateBackfillProgress(mint, cursor, processed) {
-    return this.query(`
+  async updateBackfillProgress(
+    mint: string | any[],
+    cursor: any,
+    processed: number
+  ) {
+    return this.query(
+      `
       INSERT INTO backfill_progress (mint, last_cursor, last_processed_at, total_processed, status)
       VALUES ($1, $2, NOW(), $3, 'in_progress')
       ON CONFLICT (mint) 
@@ -95,12 +129,14 @@ export class Database {
         last_cursor = $2,
         last_processed_at = NOW(),
         total_processed = backfill_progress.total_processed + $3,
-        status = 'in_progress'
-    `, [mint, cursor, processed]);
+        status = 'completed'
+    `,
+      [mint, cursor, processed]
+    );
   }
 
   async close() {
     await this.pool.end();
-    console.log('Database connection closed');
+    console.log("Database connection closed");
   }
 }

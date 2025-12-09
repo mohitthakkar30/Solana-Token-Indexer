@@ -1,20 +1,24 @@
-import { config } from './config.js';
+import { config } from "./config.js";
+import { Database } from "./database.js";
 
 export class HistoricalBackfiller {
-  constructor(database) {
+  db: Database;
+  stats: { totalProcessed: number; errors: number };
+  constructor(database: Database) {
     this.db = database;
     this.stats = {
       totalProcessed: 0,
-      errors: 0
+      errors: 0,
     };
   }
 
-  async backfill(mint, daysBack = 30) {
+  async backfill(mint: string | any[], daysBack = 30) {
     console.log(`\n📚 Starting backfill for ${mint.slice(0, 8)}...`);
     console.log(`Fetching ${daysBack} days of history`);
-    
-    const targetTimestamp = Math.floor(Date.now() / 1000) - (daysBack * 24 * 60 * 60);
-    
+
+    const targetTimestamp =
+      Math.floor(Date.now() / 1000) - daysBack * 24 * 60 * 60;
+
     let beforeSignature = undefined;
     let totalProcessed = 0;
     let page = 0;
@@ -23,38 +27,43 @@ export class HistoricalBackfiller {
     try {
       do {
         const url = `${config.helius.httpUrl}/v0/addresses/${mint}/transactions`;
-        const params = new URLSearchParams({
-          'api-key': config.helius.apiKey,
-          limit: '100'
-        });
-        
+        const params = new URLSearchParams();
+
+        if (config.helius.apiKey) {
+          params.append("api-key", config.helius.apiKey);
+        }
+        params.append("limit", "100");
+
         if (beforeSignature) {
-          params.append('before', beforeSignature);
+          params.append("before", beforeSignature);
         }
 
         const response = await fetch(`${url}?${params}`);
-        
+
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${await response.text()}`);
         }
 
         const data = await response.json();
-        
+
         if (!data || !data.length) {
-          console.log('No more transactions found');
+          console.log("No more transactions found");
           break;
         }
 
         // Check if we've gone back far enough
         const oldestInBatch = data[data.length - 1];
-        oldestTimestamp = oldestInBatch.timestamp || oldestInBatch.blockTime || 0;
-        
+        oldestTimestamp =
+          oldestInBatch.timestamp || oldestInBatch.blockTime || 0;
+
         // Process batch
         const processed = await this.processBatch(data, mint);
         totalProcessed += processed;
         page++;
 
-        console.log(`Page ${page}: Processed ${processed} transactions (Total: ${totalProcessed})`);
+        console.log(
+          `Page ${page}: Processed ${processed} transactions (Total: ${totalProcessed})`
+        );
 
         // Stop if we've reached the target date
         if (oldestTimestamp < targetTimestamp) {
@@ -64,39 +73,51 @@ export class HistoricalBackfiller {
 
         // Use last signature as cursor for next page
         beforeSignature = oldestInBatch.signature;
-        
+
         // Rate limiting
         await this.sleep(100);
-
       } while (beforeSignature && page < 1000); // Safety limit
 
       // Update backfill progress
-      await this.db.updateBackfillProgress(mint, beforeSignature || 'completed', totalProcessed);
-      
-      console.log(`✓ Backfill completed: ${totalProcessed} transactions processed`);
+      await this.db.updateBackfillProgress(
+        mint,
+        beforeSignature || "completed",
+        totalProcessed
+      );
+
+      console.log(
+        `✓ Backfill completed: ${totalProcessed} transactions processed`
+      );
       return totalProcessed;
-      
     } catch (error) {
-      console.error(`Backfill error for ${mint}:`, error.message);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error(`Backfill error for ${mint}:`, errorMessage);
       this.stats.errors++;
       throw error;
     }
   }
 
-  async processBatch(transactions, mint) {
+  async processBatch(transactions: any, mint: string | any[]) {
     let processed = 0;
-    
+
     for (const tx of transactions) {
       try {
         const signature = tx.signature;
         const slot = tx.slot;
         const blockTime = tx.timestamp || tx.blockTime;
-        
+
         if (!blockTime) continue;
 
         // Extract transfers
-        const transfers = this.extractTransfers(tx, signature, slot, blockTime, mint);
-        
+        const transfers = this.extractTransfers(
+          tx,
+          signature,
+          slot,
+          blockTime,
+          mint
+        );
+
         // Store each transfer
         for (const transfer of transfers) {
           const result = await this.db.insertTransfer(transfer);
@@ -105,18 +126,36 @@ export class HistoricalBackfiller {
           }
         }
       } catch (error) {
-        console.error(`Error processing tx ${tx.signature}:`, error.message);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        console.error(`Error processing tx ${tx.signature}:`, errorMessage);
         this.stats.errors++;
       }
     }
-    
+
     this.stats.totalProcessed += processed;
     return processed;
   }
 
-  extractTransfers(tx, signature, slot, blockTime, targetMint) {
-    const transfers = [];
-    
+  extractTransfers(
+    tx: { tokenTransfers: any[] },
+    signature: any,
+    slot: any,
+    blockTime: number,
+    targetMint: string | any[]
+  ) {
+    const transfers: {
+      signature: any;
+      instructionIndex: number;
+      slot: any;
+      blockTime: Date;
+      mint: any;
+      from: any;
+      to: any;
+      amount: number;
+      decimals: any;
+    }[] = [];
+
     // Check if transaction has token transfers
     if (!tx.tokenTransfers || tx.tokenTransfers.length === 0) {
       return transfers;
@@ -135,34 +174,41 @@ export class HistoricalBackfiller {
           from: transfer.fromUserAccount || transfer.source,
           to: transfer.toUserAccount || transfer.destination,
           amount: parseFloat(transfer.tokenAmount || 0),
-          decimals: transfer.decimals || 0
+          decimals: transfer.decimals || 0,
         });
       }
     });
-    
+
     return transfers;
   }
 
-  async backfillAll(tokenMints, daysBack = 30) {
+  async backfillAll(tokenMints: string | any[], daysBack = 30) {
     console.log(`\n📚 Starting backfill for ${tokenMints.length} token(s)`);
-    
+
     const results = [];
-    
+
     for (const mint of tokenMints) {
       try {
         const processed = await this.backfill(mint, daysBack);
         results.push({ mint, processed, success: true });
       } catch (error) {
-        console.error(`Failed to backfill ${mint}:`, error.message);
-        results.push({ mint, processed: 0, success: false, error: error.message });
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        console.error(`Failed to backfill ${mint}:`, errorMessage);
+        results.push({
+          mint,
+          processed: 0,
+          success: false,
+          error: errorMessage,
+        });
       }
     }
-    
+
     return results;
   }
 
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   getStats() {
